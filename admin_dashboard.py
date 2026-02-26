@@ -6,6 +6,8 @@ import database
 
 def show_admin_dashboard():
     if st.sidebar.button("⬅️ Home / Logout"):
+        username = st.session_state.get('username', 'Guest')
+        database.log_activity(username, "Logout", "Admin logged out")
         st.session_state.logged_in = False
         st.session_state.user_role = None
         st.rerun()
@@ -28,10 +30,15 @@ def show_admin_dashboard():
     m3.metric("📜 Credits Issued", f"{total_issued:,.0f} tCO2")
     m4.metric("📉 Credits Retired", f"{total_retired:,.0f} tCO2")
 
+    # Purchase metrics
+    purchases = database.get_purchases()
+    total_purchase_val = sum(p['amount'] for p in purchases)
+    st.sidebar.metric("💳 Gross Purchases", f"{total_purchase_val:,.2f} tCO2")
+
     st.divider()
 
     # Tabs for Admin Workflow
-    tabs = st.tabs(["🚀 Pending Verifications", "📊 System Analytics", "📜 Verified Registry", "🛒 Marketplace", "💳 Purchases"])
+    tabs = st.tabs(["🚀 Pending Verifications", "📊 System Analytics", "📜 Verified Registry", "🛒 Marketplace", "💳 Purchase History", "🕒 System Activity"])
 
     with tabs[0]:
         st.subheader("Projects Awaiting Verification")
@@ -100,3 +107,20 @@ def show_admin_dashboard():
             st.dataframe(df_p, use_container_width=True, hide_index=True)
         else:
             st.info("No credit purchases recorded in the system yet.")
+
+    with tabs[5]:
+        st.subheader("Global System Activity Log")
+        all_logs = database.get_all_activity_logs()
+        if all_logs:
+            log_df = pd.DataFrame(all_logs, columns=["User", "Activity", "Description", "Timestamp"])
+            st.dataframe(log_df, use_container_width=True, hide_index=True)
+            
+            # Analytics on activity
+            st.divider()
+            st.write("**Activity Distribution**")
+            act_counts = log_df['Activity'].value_counts().reset_index()
+            act_counts.columns = ['Activity', 'Count']
+            fig_act = px.bar(act_counts, x='Activity', y='Count', color='Activity', title="System Usage via Activities")
+            st.plotly_chart(fig_act, use_container_width=True)
+        else:
+            st.info("No activity logs found.")

@@ -7,16 +7,20 @@ def get_connection():
 def init_db():
     conn = get_connection()
     c = conn.cursor()
-    # Users table with role
+    # Users table with role and email
     c.execute('''CREATE TABLE IF NOT EXISTS users
-                 (username TEXT PRIMARY KEY, password TEXT, role TEXT)''')
+                 (username TEXT PRIMARY KEY, password TEXT, role TEXT, email TEXT)''')
     
-    # Migration: add role column if it doesn't exist (for older databases)
+    # Migration: add role/email columns if they don't exist
     try:
         c.execute("ALTER TABLE users ADD COLUMN role TEXT")
-        conn.commit()
     except sqlite3.OperationalError:
-        pass  # Column already exists
+        pass 
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN email TEXT")
+    except sqlite3.OperationalError:
+        pass
+    conn.commit()
     
     # Projects table
     c.execute('''CREATE TABLE IF NOT EXISTS projects
@@ -28,6 +32,11 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS purchases
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, project_id TEXT, 
                   amount REAL, date TEXT)''')
+    
+    # Activity Log table
+    c.execute('''CREATE TABLE IF NOT EXISTS activity_log
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, activity_type TEXT, 
+                  description TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
     
     conn.commit()
     
@@ -53,17 +62,56 @@ def init_db():
         conn.commit()
     conn.close()
 
-def add_user(username, hashed_password, role="user"):
+def add_user(username, hashed_password, role="user", email=None):
     conn = get_connection()
     c = conn.cursor()
     try:
-        c.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)", (username, hashed_password, role))
+        c.execute("INSERT INTO users (username, password, role, email) VALUES (?, ?, ?, ?)", (username, hashed_password, role, email))
         conn.commit()
         return True
     except sqlite3.IntegrityError:
         return False
     finally:
         conn.close()
+
+def log_activity(username, activity_type, description):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("INSERT INTO activity_log (username, activity_type, description) VALUES (?, ?, ?)", 
+              (username, activity_type, description))
+    conn.commit()
+    conn.close()
+
+def get_all_activity_logs():
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT username, activity_type, description, timestamp FROM activity_log ORDER BY timestamp DESC")
+    data = c.fetchall()
+    conn.close()
+    return data
+
+def get_activity_log(username):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT activity_type, description, timestamp FROM activity_log WHERE username = ? ORDER BY timestamp DESC", (username,))
+    data = c.fetchall()
+    conn.close()
+    return data
+
+def update_user_email(username, email):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("UPDATE users SET email = ? WHERE username = ?", (email, username))
+    conn.commit()
+    conn.close()
+
+def get_user_email(username):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT email FROM users WHERE username = ?", (username,))
+    res = c.fetchone()
+    conn.close()
+    return res[0] if res else None
 
 def verify_user(username, hashed_password):
     conn = get_connection()
@@ -110,3 +158,13 @@ def get_purchases():
     data = [dict(zip(cols, row)) for row in c.fetchall()]
     conn.close()
     return data
+
+def add_purchase(username, project_id, amount):
+    conn = get_connection()
+    c = conn.cursor()
+    from datetime import datetime
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    c.execute("INSERT INTO purchases (username, project_id, amount, date) VALUES (?, ?, ?, ?)", 
+              (username, project_id, amount, now_str))
+    conn.commit()
+    conn.close()

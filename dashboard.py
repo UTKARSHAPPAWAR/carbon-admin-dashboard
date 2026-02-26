@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import database
 
 def show_dashboard():
     # --- Custom CSS ---
@@ -88,13 +89,30 @@ def show_dashboard():
             st.info("Marketplace is empty.")
 
     with col_b:
-        st.subheader("🔔 Recent Activity")
-        st.markdown("""
-        - **New Project**: 'Amazon Conservation' verified (2h ago)
-        - **Calculated**: Personal footprint updated for User (5h ago)
-        - **Marketplace**: 5,000 credits retired by 'EcoCorp' (Yesterday)
-        - **Registry**: New documentation uploaded for 'Wind India' (Yesterday)
-        """)
+        st.subheader("🔔 Smart Insights & Alerts")
+        username = st.session_state.get('username', 'Guest')
+        logs = database.get_activity_log(username)
+        
+        # Automation: Automated Activity Insights
+        if len(logs) > 1:
+            st.info("💡 **Insight**: You're becoming a tracking pro! Regular monitoring is the first step to Net Zero.")
+        
+        if pers_total > 500:
+            st.error("⚠️ **High Emission Alert**: Your personal footprint is trending high. Consider reducing travel.")
+        
+        purchased = st.session_state.get('purchased_offsets', 0)
+        if purchased > 0:
+            st.success(f"🌟 **Climate Action**: You have offset **{purchased:.3f} tCO2** so far. Great work!")
+        else:
+            st.warning("🔭 **Opportunity**: You haven't purchased any carbon offsets yet. Visit the Marketplace to reach Net Zero.")
+
+        st.markdown("---")
+        st.write("**Recent Logged Actions:**")
+        if logs:
+            for log in logs[:5]:
+                st.write(f"- **{log[0]}**: {log[1]} ({log[2][:16]})")
+        else:
+            st.write("No interactions recorded yet.")
 
     st.divider()
 
@@ -132,6 +150,22 @@ def show_dashboard():
         st.markdown("- [Verra Registry](https://registry.verra.org/)")
         st.markdown("- [Gold Standard Impact Registry](https://registry.goldstandard.org/)")
         st.markdown("- [World Bank Carbon Pricing Dashboard](https://carbonpricingdashboard.worldbank.org/)")
+
+    # --- Section 5: Activity History ---
+    st.divider()
+    st.header("🕒 Full Activity History")
+    username = st.session_state.get('username', 'Guest')
+    all_logs = database.get_activity_log(username)
+    if all_logs:
+        log_df = pd.DataFrame(all_logs, columns=["Action", "Description", "Timestamp"])
+        st.dataframe(log_df, use_container_width=True, hide_index=True)
+        
+        # Automation: Automated Sustainability Reports (PDF Simulation)
+        if st.button("Generate Comprehensive Sustainability Report (PDF)"):
+            st.success("📄 **Report Generated!** Your sustainability footprint analysis for the last month is ready.")
+            database.log_activity(username, "Report Generation", "User generated a monthly sustainability report")
+    else:
+        st.info("Start using the navigator to see your activity history here.")
 
     st.divider()
     st.markdown("<p style='text-align: center;'>Carbon Dashboard v1.0 | Empowering Sustainable Decisions</p>", unsafe_allow_html=True)

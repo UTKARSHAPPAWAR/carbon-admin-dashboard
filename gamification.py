@@ -1,5 +1,7 @@
 import streamlit as st
 from datetime import datetime
+import pandas as pd
+import database
 
 def show_gamification():
     if st.button("⬅️ Back to Home"):
@@ -58,6 +60,9 @@ def show_gamification():
         {"Rank": "5th", "User": "User_E1P", "Footprint (kg CO2)": 112.7, "Offsets Purchased": 0.00},
         {"Rank": "—", "User": "You", "Footprint (kg CO2)": round(pers_total, 2) if pers_total > 0 else "Run calc first", "Offsets Purchased": round(purchased_offsets, 3)},
     ]
-    import pandas as pd
     df = pd.DataFrame(leaderboard_data)
     st.dataframe(df, use_container_width=True, hide_index=True)
+    
+    # Log viewing achievements
+    username = st.session_state.get('username', 'Guest')
+    database.log_activity(username, "Achievement View", f"User viewed achievements and leaderboard (Streak: {st.session_state.streak} days)")

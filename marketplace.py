@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import database
 
 def show_marketplace():
     if st.button("⬅️ Back to Home"):
@@ -32,6 +33,31 @@ def show_marketplace():
         st.success("🎉 Your footprint is fully offset! You have achieved Net Zero.")
     elif combined_tonnes > 0:
         st.warning(f"⚠️ You still need to offset **{remaining:.3f} tCO2** to reach Net Zero.")
+        if st.button("🤖 AI One-Click Net Zero (Auto-Offset)", type="primary"):
+            # Automation: AI-Driven Offset Automation
+            # Find the best project (simulated as the first one)
+            if projects:
+                best_proj = projects[0]
+                available = best_proj.get('Issued', 0) - best_proj.get('Retired', 0)
+                amount_to_buy = min(remaining, float(available))
+                cost = amount_to_buy * 10
+                
+                if st.session_state.wallet_credits >= cost:
+                    st.session_state.wallet_credits -= int(cost)
+                    st.session_state.purchased_offsets += amount_to_buy
+                    
+                    # Record the purchase in the database
+                    username = st.session_state.get('username', 'Guest')
+                    database.add_purchase(username, best_proj['ID'], amount_to_buy)
+                    
+                    best_proj['Retired'] = best_proj.get('Retired', 0) + int(amount_to_buy * 1000)
+                    
+                    username = st.session_state.get('username', 'Guest')
+                    database.log_activity(username, "Automation", f"AI Auto-Offset: Purchased {amount_to_buy:.3f} tCO2 from {best_proj['Project Name']}")
+                    st.success(f"✅ AI Automation: Successfully offset {amount_to_buy:.3f} tCO2 using {best_proj['Project Name']}!")
+                    st.rerun()
+                else:
+                    st.error("Insufficient credits for AI Auto-Offset.")
 
     st.divider()
 
@@ -68,7 +94,16 @@ def show_marketplace():
                 else:
                     st.session_state.wallet_credits -= int(cost)
                     st.session_state.purchased_offsets += qty
+                    
+                    # Record the purchase in the database
+                    username = st.session_state.get('username', 'Guest')
+                    database.add_purchase(username, proj['ID'], qty)
+                    
                     # Update the project's retired count
                     proj['Retired'] = proj.get('Retired', 0) + int(qty * 1000)
+                    
+                    username = st.session_state.get('username', 'Guest')
+                    database.log_activity(username, "Marketplace Purchase", f"Purchased {qty} tCO2 from {proj['Project Name']}")
+                    
                     st.success(f"✅ Successfully purchased {qty} tCO2 from {proj['Project Name']}!")
                     st.rerun()

@@ -1,5 +1,6 @@
 import streamlit as st
 import random
+import database
 
 QUIZ_QUESTIONS = [
     {
@@ -102,6 +103,10 @@ def show_education():
                     st.session_state.quiz_score = score
                     st.session_state.quiz_done = True
                     st.session_state.calc_count = st.session_state.get('calc_count', 0) + 1
+                    
+                    username = st.session_state.get('username', 'Guest')
+                    database.log_activity(username, "Educational Quiz", f"Completed climate quiz with score {score}/{len(QUIZ_QUESTIONS)}")
+                    
                     st.rerun()
         else:
             score = st.session_state.quiz_score

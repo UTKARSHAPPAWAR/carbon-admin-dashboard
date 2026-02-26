@@ -39,10 +39,22 @@ if 'pers_total' not in st.session_state:
     st.session_state.pers_total = 0
 if 'ind_total' not in st.session_state:
     st.session_state.ind_total = 0
+if 'otp_verified' not in st.session_state:
+    st.session_state.otp_verified = False
+if 'pending_user' not in st.session_state:
+    st.session_state.pending_user = None
+if 'generated_otp' not in st.session_state:
+    st.session_state.generated_otp = None
 
 # --- Helpers ---
 def hash_pass(password):
     return hashlib.sha256(password.encode()).hexdigest()
+
+def send_otp_email(username, email, otp):
+    # Mocking email delivery
+    st.info(f"📩 OTP sent to {email} for user {username}")
+    print(f"DEBUG: OTP for {username} ({email}) is {otp}")
+    return True
 
 # --- Data: Personal Emission Factors ---
 EMISSION_FACTORS = {
@@ -79,6 +91,7 @@ EMISSION_FACTORS = {
 
 IND_FACTORS = {
     "Natural Gas (m3)": 2.02, "Diesel (Liters)": 2.68, "Fuel Oil (Liters)": 2.97,
+    "Petrol (Liters)": 2.31, "Coal (kg)": 2.42, "LPG (kg)": 2.98,
     "Grid Electricity (kWh)": 0.45, "Renewable Energy (kWh)": 0.02,
     "Business Travel (km)": 0.18, "Waste Generated (kg)": 0.52, "Water Usage (m3)": 0.34
 }
@@ -101,50 +114,95 @@ def show_auth():
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         if st.session_state.auth_mode == 'login':
-            st.markdown("<h2 style='text-align: center;'>🔐 Sign In</h2>", unsafe_allow_html=True)
-            
-            # Login Type Selection
-            login_type = st.radio("Log in as:", ["User", "Admin"], horizontal=True)
-            
-            username = st.text_input("Username", key="login_user")
-            password = st.text_input("Password", type="password", key="login_pass")
-            
-            if st.button("Log In", use_container_width=True, type="primary"):
-                role = database.verify_user(username, hash_pass(password))
-                if role:
-                    if login_type == "Admin" and role != "admin":
-                        st.error("Access Denied: You do not have admin privileges.")
-                    else:
+            if st.session_state.pending_user:
+                st.markdown("<h2 style='text-align: center;'>🔑 Two-Step Verification</h2>", unsafe_allow_html=True)
+                st.write(f"Enter the 6-digit code sent to your registered email.")
+                otp_input = st.text_input("Verification Code", max_chars=6)
+                
+                if st.button("Verify OTP", use_container_width=True, type="primary"):
+                    if otp_input == st.session_state.generated_otp:
                         st.session_state.logged_in = True
+                        st.session_state.otp_verified = True
+                        role = st.session_state.pending_role
+                        st.session_state.username = st.session_state.pending_user
                         st.session_state.user_role = role
                         st.session_state.view = 'admin_dash' if role == 'admin' else 'landing'
+                        database.log_activity(st.session_state.username, "Login", "User logged in with 2SV")
+                        st.session_state.pending_user = None
+                        st.session_state.generated_otp = None
+                        st.rerun()
+                    else:
+                        st.error("Invalid verification code. Please try again.")
+                
+                if st.button("Cancel", use_container_width=True):
+                    st.session_state.pending_user = None
+                    st.session_state.generated_otp = None
+                    st.rerun()
+
+            else:
+                st.markdown("<h2 style='text-align: center;'>🔐 Sign In</h2>", unsafe_allow_html=True)
+                
+                # Login Type Selection
+                login_type = st.radio("Log in as:", ["User", "Admin"], horizontal=True)
+                
+                username = st.text_input("Username", key="login_user")
+                password = st.text_input("Password", type="password", key="login_pass")
+                
+                if st.button("Log In", use_container_width=True, type="primary"):
+                    role = database.verify_user(username, hash_pass(password))
+                    if role:
+                        if login_type == "Admin" and role != "admin":
+                            st.error("Access Denied: You do not have admin privileges.")
+                        elif role == "admin":
+                            # Admin bypass for OTP in this demo or implement for admin too
+                            st.session_state.logged_in = True
+                            st.session_state.user_role = role
+                            st.session_state.username = username
+                            st.session_state.view = 'admin_dash'
+                            database.log_activity(username, "Login", "Admin logged in")
+                            st.rerun()
+                        else:
+                            # Trigger 2SV
+                            import random
+                            st.session_state.generated_otp = str(random.randint(100000, 999999))
+                            st.session_state.pending_user = username
+                            st.session_state.pending_role = role
+                            email = database.get_user_email(username)
+                            if not email:
+                                # Fallback if no email is set (for old accounts)
+                                email = f"{username}@example.com"
+                            send_otp_email(username, email, st.session_state.generated_otp)
+                            st.rerun()
+                    else:
+                        st.error("Invalid username or password")
+            
+            if not st.session_state.pending_user:
+                if login_type == "User":
+                    c1, c2 = st.columns(2)
+                    if c1.button("Create Account", use_container_width=True):
+                        st.session_state.auth_mode = 'signup'
+                        st.rerun()
+                    if c2.button("Forgot Password?", use_container_width=True):
+                        st.session_state.auth_mode = 'forgot'
                         st.rerun()
                 else:
-                    st.error("Invalid username or password")
-            
-            if login_type == "User":
-                c1, c2 = st.columns(2)
-                if c1.button("Create Account", use_container_width=True):
-                    st.session_state.auth_mode = 'signup'
-                    st.rerun()
-                if c2.button("Forgot Password?", use_container_width=True):
-                    st.session_state.auth_mode = 'forgot'
-                    st.rerun()
-            else:
-                st.info("System Admin Access: Standard credentials required.")
+                    st.info("System Admin Access: Standard credentials required.")
 
         elif st.session_state.auth_mode == 'signup':
             st.markdown("<h2 style='text-align: center;'>📝 Create Account</h2>", unsafe_allow_html=True)
             new_user = st.text_input("New Username")
+            new_email = st.text_input("Email Address (for 2SV)")
             new_pass = st.text_input("New Password", type="password")
             confirm_pass = st.text_input("Confirm Password", type="password")
             if st.button("Sign Up", use_container_width=True, type="primary"):
-                if new_pass != confirm_pass:
+                if not new_email or "@" not in new_email:
+                    st.error("Please enter a valid email address")
+                elif new_pass != confirm_pass:
                     st.error("Passwords do not match")
                 elif len(new_pass) < 6:
                     st.warning("Password should be at least 6 characters")
                 else:
-                    if database.add_user(new_user, hash_pass(new_pass)):
+                    if database.add_user(new_user, hash_pass(new_pass), email=new_email):
                         st.success("Account created! You can now log in.")
                         st.session_state.auth_mode = 'login'
                         st.rerun()
@@ -165,10 +223,15 @@ def show_auth():
                 st.rerun()
 
 def show_landing_page():
-    # Sidebar Logout
+    # Sidebar Info & Logout
     with st.sidebar:
-        st.write(f"Logged in as: User")
+        st.write(f"Logged in as: **{st.session_state.get('username', 'User')}**")
+        purchased = st.session_state.get('purchased_offsets', 0)
+        st.metric("✅ Total Offsets", f"{purchased:.3f} tCO2")
+        
         if st.button("Logout", use_container_width=True):
+            username = st.session_state.get('username', 'Guest')
+            database.log_activity(username, "Logout", "User logged out")
             st.session_state.logged_in = False
             st.rerun()
 
@@ -272,12 +335,19 @@ def show_landing_page():
             st.session_state.view = 'education'; st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
-def calculate_personal_emission(country_factors, transportation, electricity, diet, waste):
+def calculate_personal_emission(country_factors, transportation, electricity, diet, waste, petrol=0, diesel=0, lpg=0):
     t_e = transportation * country_factors.get('Transportation', 0)
     e_e = electricity * country_factors.get('Electricity', 0)
     d_e = diet * country_factors.get('Diet', 0)
     w_e = waste * country_factors.get('Waste', 0)
-    return t_e + e_e + d_e + w_e, t_e, e_e, d_e, w_e
+    
+    # Fuel emissions
+    p_e = petrol * IND_FACTORS.get("Petrol (Liters)", 2.31)
+    ds_e = diesel * IND_FACTORS.get("Diesel (Liters)", 2.68)
+    l_e = lpg * IND_FACTORS.get("LPG (kg)", 2.98)
+    
+    total = t_e + e_e + d_e + w_e + p_e + ds_e + l_e
+    return total, t_e, e_e, d_e, w_e, p_e, ds_e, l_e
 
 def show_personal_calculator():
     if st.button("⬅️ Back to Home"):
@@ -310,15 +380,31 @@ def show_personal_calculator():
         with st.expander("🍽️ Diet & Lifestyle"):
             v_diet = st.file_uploader("Grocery/Hotel Receipts, Coupons", type=['pdf', 'jpg', 'png'], accept_multiple_files=True)
             
+        st.header("⛽ Fuel Usage (Monthly)")
+        petrol = st.number_input("Petrol (Liters)", value=0.0)
+        diesel = st.number_input("Diesel (Liters)", value=0.0)
+        lpg = st.number_input("LPG (kg)", value=0.0)
+            
         calc = st.button("Calculate & Verify", type="primary")
 
     if calc:
-        total, t_e, e_e, d_e, w_e = calculate_personal_emission(EMISSION_FACTORS[region][country], t, e, d, w)
+        total, t_e, e_e, d_e, w_e, p_e, ds_e, l_e = calculate_personal_emission(EMISSION_FACTORS[region][country], t, e, d, w, petrol, diesel, lpg)
         st.session_state.pers_total = total
         # Save breakdown for AI Assistant
-        st.session_state.pers_breakdown = {'transport': t_e, 'electricity': e_e, 'diet': d_e, 'waste': w_e}
+        st.session_state.pers_breakdown = {
+            'transport': t_e, 'electricity': e_e, 'diet': d_e, 'waste': w_e,
+            'petrol': p_e, 'diesel': ds_e, 'lpg': l_e
+        }
         st.session_state.calc_count = st.session_state.get('calc_count', 0) + 1
         
+        username = st.session_state.get('username', 'Guest')
+        database.log_activity(username, "Footprint Calculation", f"Personal footprint calculated: {total:.2f} kgCO2")
+
+        # Automation: High Emission Alert
+        if total > 500:
+             st.error(f"🚨 **High Emission Alert!** Your monthly footprint of {total:.2f} kgCO2 is higher than average.")
+             database.log_activity(username, "Alert", "High emission alert triggered")
+
         # Display verification status if files are uploaded
         if any([v_id, v_travel, v_elec, v_diet]):
             st.success("✅ Footprint Verified using uploaded documents")
@@ -327,9 +413,9 @@ def show_personal_calculator():
             
         m1, m2, m3 = st.columns(3); m1.metric("Total (kgCO2)", f"{total:.2f}"); m2.metric("Yearly (tCO2)", f"{total*12/1000:.2f}"); m3.metric("Daily (kgCO2)", f"{total/30:.2f}")
         c1, c2 = st.columns(2)
-        fig_pie = px.pie(names=['Transport', 'Electricity', 'Diet', 'Waste'], values=[t_e, e_e, d_e, w_e], title="Distribution")
+        fig_pie = px.pie(names=['Transport', 'Electricity', 'Diet', 'Waste', 'Fuel'], values=[t_e, e_e, d_e, w_e, p_e+ds_e+l_e], title="Distribution")
         c1.plotly_chart(fig_pie, use_container_width=True)
-        fig_bar = px.bar(x=['Transport', 'Electricity', 'Diet', 'Waste'], y=[t_e, e_e, d_e, w_e], title="Impact by Category")
+        fig_bar = px.bar(x=['Transport', 'Electricity', 'Diet', 'Waste', 'Fuel'], y=[t_e, e_e, d_e, w_e, p_e+ds_e+l_e], title="Impact by Category")
         c2.plotly_chart(fig_bar, use_container_width=True)
 
 def show_industrial_calculator():
@@ -342,15 +428,24 @@ def show_industrial_calculator():
     
     tabs = st.tabs(["Scope 1", "Scope 2", "Scope 3"])
     with tabs[0]:
-        gas = st.number_input("Gas (m3)", value=100.0)
+        col1, col2 = st.columns(2)
+        gas = col1.number_input("Natural Gas (m3)", value=100.0)
+        coal = col2.number_input("Coal (kg)", value=0.0)
+        petrol_i = col1.number_input("Petrol (Liters)", value=0.0)
+        diesel_i = col2.number_input("Diesel (Liters)", value=0.0)
     with tabs[1]:
         elec = st.number_input("Elec (kWh)", value=500.0)
     with tabs[2]:
         travel = st.number_input("Travel (km)", value=1000.0)
 
     if st.button("Calculate Industrial", type="primary"):
-        s1 = gas * 2.02; s2 = elec * 0.45; s3 = travel * 0.18; total = s1 + s2 + s3
+        s1 = (gas * 2.02) + (coal * 2.42) + (petrol_i * 2.31) + (diesel_i * 2.68)
+        s2 = elec * 0.45; s3 = travel * 0.18; total = s1 + s2 + s3
         st.session_state.ind_total = total # Save to session state for dashboard
+        
+        username = st.session_state.get('username', 'Guest')
+        database.log_activity(username, "Industrial Calculation", f"Industrial footprint calculated: {total/1000:.2f} tCO2")
+
         m1, m2, m3, m4 = st.columns(4); m1.metric("Total (tCO2)", f"{total/1000:.2f}"); m2.metric("S1", f"{s1/1000:.2f}"); m3.metric("S2", f"{s2/1000:.2f}"); m4.metric("S3", f"{s3/1000:.2f}")
         cl, cr = st.columns(2)
         fig_pie = px.pie(names=['S1', 'S2', 'S3'], values=[s1, s2, s3], title="Scope Split")

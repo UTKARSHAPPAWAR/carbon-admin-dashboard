@@ -1,11 +1,16 @@
 import streamlit as st
 from datetime import datetime
 import io
+import database
 
 def show_reporting():
     if st.button("⬅️ Back to Home"):
         st.session_state.view = 'landing'
         st.rerun()
+
+    # Log report generation activity
+    username = st.session_state.get('username', 'Guest')
+    database.log_activity(username, "Report Generation", "User viewed/generated the sustainability report preview")
 
     st.title("📄 Professional Sustainability Report")
     st.markdown("Generate a downloadable text-based sustainability report based on all your data.")
@@ -69,13 +74,14 @@ def show_reporting():
     st.code(report_text, language="text")
 
     # Download Button
-    st.download_button(
+    if st.download_button(
         label="⬇️ Download Report (.txt)",
         data=report_text.encode("utf-8"),
         file_name=f"carbon_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
         mime="text/plain",
         type="primary",
         use_container_width=True
-    )
+    ):
+        database.log_activity(username, "Report Download", "User downloaded the text-based sustainability report")
 
     st.info("💡 Tip: For a full PDF report, open this file and use your browser's Print → Save as PDF option.")
