@@ -15,6 +15,10 @@ from admin_dashboard import show_admin_dashboard
 
 import database
 import email_utils
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # --- Initialize Database ---
 database.init_db()
