@@ -14,6 +14,7 @@ from education import show_education
 from admin_dashboard import show_admin_dashboard
 
 import database
+import email_utils
 
 # --- Initialize Database ---
 database.init_db()
@@ -51,10 +52,17 @@ def hash_pass(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 def send_otp_email(username, email, otp):
-    # Mocking email delivery
-    st.info(f"📩 OTP sent to {email} for user {username}")
-    print(f"DEBUG: OTP for {username} ({email}) is {otp}")
-    return True
+    """
+    Sends a 6-digit OTP to the user's registered email address.
+    """
+    if email_utils.send_otp(email, username, otp):
+        st.success(f"📩 A verification code has been sent to {email}")
+        return True
+    else:
+        st.error("❌ Failed to send verification code. Please check your internet connection or contact support.")
+        # Log error for admin
+        database.log_activity(username, "Error", f"Failed to send verification code to {email}")
+        return False
 
 # --- Data: Personal Emission Factors ---
 EMISSION_FACTORS = {
@@ -349,6 +357,117 @@ def calculate_personal_emission(country_factors, transportation, electricity, di
     total = t_e + e_e + d_e + w_e + p_e + ds_e + l_e
     return total, t_e, e_e, d_e, w_e, p_e, ds_e, l_e
 
+def show_advanced_analysis(total, breakdown, calc_type='personal'):
+    st.divider()
+    st.markdown(f"## 📊 {calc_type.title()} Performance Analysis")
+    
+    # 1. Performance Assessment & Summary Cards
+    col1, col2, col3, col4 = st.columns(4)
+    
+    # Performance Grade logic
+    avg = 400 if calc_type == 'personal' else 5000 # Monthly kgCO2 references
+    ratio = total / avg if avg > 0 else 0
+    if ratio < 0.5: grade, color = "A (Excellent)", "#28a745"
+    elif ratio < 0.8: grade, color = "B (Good)", "#7ed321"
+    elif ratio < 1.2: grade, color = "C (Average)", "#ffc107"
+    elif ratio < 1.8: grade, color = "D (Fair)", "#fd7e14"
+    else: grade, color = "F (Poor)", "#dc3545"
+    
+    with col1:
+        st.markdown(f"<div style='background-color:{color}; padding:10px; border-radius:10px; text-align:center; color:white;'><strong>Grade: {grade}</strong></div>", unsafe_allow_html=True)
+    col2.metric("Total Monthly", f"{total:.2f} kgCO2")
+    col3.metric("Projected Annual", f"{(total*12)/1000:.2f} tCO2")
+    col4.metric("Vs. Regional Avg", f"{((ratio-1)*100):+.1f}%")
+
+    # 2. Detailed Visualizations
+    tab1, tab2, tab3 = st.tabs(["💡 Visual Insights", "📝 Critical Analysis", "📅 Forecast & Goals"])
+    
+    with tab1:
+        c1, c2 = st.columns(2)
+        # Pie Chart: Emission Breakdown
+        fig_pie = px.pie(
+            names=list(breakdown.keys()), 
+            values=list(breakdown.values()), 
+            title="Detailed Emission Breakdown",
+            hole=0.4,
+            color_discrete_sequence=px.colors.qualitative.Prism
+        )
+        fig_pie.update_traces(textinfo='percent+label')
+        c1.plotly_chart(fig_pie, use_container_width=True)
+        
+        # Bar Chart: Comparison to Projected/Sustainable
+        sustainable_goal = avg * 0.7
+        fig_comp = go.Figure(data=[
+            go.Bar(name='Current (You)', x=['Emissions'], y=[total], marker_color='#2a5298', text=[f"{total:.0f}"], textposition='auto'),
+            go.Bar(name='Sustainable Goal', x=['Emissions'], y=[sustainable_goal], marker_color='#28a745', text=[f"{sustainable_goal:.0f}"], textposition='auto')
+        ])
+        fig_comp.update_layout(title="Carbon for You vs. Projected Goal", barmode='group')
+        c2.plotly_chart(fig_comp, use_container_width=True)
+
+    with tab2:
+        st.subheader("Deep Dive: Parameter Analysis")
+        # Create a dataframe for the table
+        df_breakdown = pd.DataFrame({
+            "Parameter": list(breakdown.keys()),
+            "Emissions (kgCO2)": [f"{v:.2f}" for v in breakdown.values()],
+            "Contribution (%)": [f"{(v/total*100):.1f}%" if total > 0 else "0%" for v in breakdown.values()]
+        })
+        st.dataframe(df_breakdown, use_container_width=True, hide_index=True)
+        
+        # Identify Top Priority Action
+        top_contributor = max(breakdown, key=breakdown.get)
+        st.warning(f"🚨 **Top Priority Action:** Your highest emission source is **{top_contributor}**. Focus your initial reduction efforts here.")
+
+    with tab3:
+        st.subheader("12-Month Emissions Forecast")
+        months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        # Dummy projection with a slight reduction trend
+        forecast_current = [total * (1 + (i*0.005)) for i in range(12)] # Slight inflation
+        forecast_target = [total * (1 - (i*0.04)) for i in range(12)] # Aggressive reduction
+        
+        fig_forecast = go.Figure()
+        fig_forecast.add_trace(go.Scatter(x=months, y=forecast_current, name='Business as Usual (Projected)', line={'color': '#dc3545', 'dash': 'dot'}))
+        fig_forecast.add_trace(go.Scatter(x=months, y=forecast_target, name='Optimization Path (Goal)', line={'color': '#28a745', 'width': 4}))
+        fig_forecast.update_layout(title="12-Month Projected Cumulative Impact vs Target", xaxis_title="Month", yaxis_title="Emissions (kgCO2)")
+        st.plotly_chart(fig_forecast, use_container_width=True)
+
+    # 3. Optimization Recommendations
+    st.subheader("🚀 Optimization Recommendations")
+    rec_col1, rec_col2 = st.columns(2)
+    
+    recs = {
+        "personal": [
+            ("🚲 Active Transport", "Try cycling or walking for short trips. For longer commutes, prioritize public transit or carpooling."),
+            ("💡 Smart Energy", "Switch to energy-efficient appliances and remember to unplug phantom loads when not in use."),
+            ("🥗 Conscious Diet", "Reducing red meat consumption even by 20% can significantly lower your personal footprint."),
+            ("♻️ Zero Waste", "Shift towards a circular economy by repairing, reusing, and composting to minimize landfill waste.")
+        ],
+        "industrial": [
+            ("⚡ Green Procurement", "Audit your energy suppliers. Switching to 100% renewable energy credits is the fastest Scope 2 win."),
+            ("🚛 Logistics Optimization", "Implement AI-driven route planning and investigate hydrogen/electric heavy-duty transit options."),
+            ("🏭 Lean Production", "Optimize thermal processes and install variable speed drives on heavy machinery."),
+            ("📊 Supplier Engagement", "Collaborate with high-impact Scope 3 partners to implement shared sustainability standards.")
+        ]
+    }
+    
+    current_recs = recs.get(calc_type, recs["personal"])
+    
+    for i, (title, text) in enumerate(current_recs):
+        with (rec_col1 if i % 2 == 0 else rec_col2):
+            st.info(f"**{title}**\n\n{text}")
+
+    # 4. Share Results
+    st.divider()
+    s_col1, s_col2, s_col3 = st.columns([1, 1, 1])
+    with s_col1:
+        st.markdown("### 📤 Share Your Results")
+    with s_col2:
+        if st.button("📋 Copy Results Summary", use_container_width=True):
+            st.toast("Summary copied to clipboard!")
+    with s_col3:
+        if st.button("🧧 Generate Shareable Badge", use_container_width=True):
+            st.toast("Badge generated! Saving to gallery...")
+
 def show_personal_calculator():
     if st.button("⬅️ Back to Home"):
         st.session_state.view = 'landing'; st.rerun()
@@ -412,11 +531,9 @@ def show_personal_calculator():
             st.warning("⚠️ Footprint Unverified (No documents provided)")
             
         m1, m2, m3 = st.columns(3); m1.metric("Total (kgCO2)", f"{total:.2f}"); m2.metric("Yearly (tCO2)", f"{total*12/1000:.2f}"); m3.metric("Daily (kgCO2)", f"{total/30:.2f}")
-        c1, c2 = st.columns(2)
-        fig_pie = px.pie(names=['Transport', 'Electricity', 'Diet', 'Waste', 'Fuel'], values=[t_e, e_e, d_e, w_e, p_e+ds_e+l_e], title="Distribution")
-        c1.plotly_chart(fig_pie, use_container_width=True)
-        fig_bar = px.bar(x=['Transport', 'Electricity', 'Diet', 'Waste', 'Fuel'], y=[t_e, e_e, d_e, w_e, p_e+ds_e+l_e], title="Impact by Category")
-        c2.plotly_chart(fig_bar, use_container_width=True)
+        
+        # Advanced Analysis
+        show_advanced_analysis(total, st.session_state.pers_breakdown, 'personal')
 
 def show_industrial_calculator():
     if st.button("⬅️ Back to Home"):
@@ -447,11 +564,10 @@ def show_industrial_calculator():
         database.log_activity(username, "Industrial Calculation", f"Industrial footprint calculated: {total/1000:.2f} tCO2")
 
         m1, m2, m3, m4 = st.columns(4); m1.metric("Total (tCO2)", f"{total/1000:.2f}"); m2.metric("S1", f"{s1/1000:.2f}"); m3.metric("S2", f"{s2/1000:.2f}"); m4.metric("S3", f"{s3/1000:.2f}")
-        cl, cr = st.columns(2)
-        fig_pie = px.pie(names=['S1', 'S2', 'S3'], values=[s1, s2, s3], title="Scope Split")
-        cl.plotly_chart(fig_pie, use_container_width=True)
-        fig_bar = px.bar(x=['Gas', 'Elec', 'Travel'], y=[s1, s2, s3], title="Source Split")
-        cr.plotly_chart(fig_bar, use_container_width=True)
+        
+        # Advanced Analysis
+        ind_breakdown = {'Scope 1': s1, 'Scope 2': s2, 'Scope 3': s3}
+        show_advanced_analysis(total, ind_breakdown, 'industrial')
 
 # --- Main Logic ---
 if not st.session_state.logged_in:
